@@ -1,0 +1,76 @@
+- hosts: default
+  become: yes
+  vars:
+    fqdn_hostname: satellite01.example.loc
+    rhn_user: "{{ lookup('env','rh_user') }}"
+    rhn_pass: "{{ lookup('env','rh_pass') }}"
+    rhn_pool: "{{ lookup('env','rh_pool') }}"
+    install_sos: True
+    local_iso_path: /mnt/cleardata/iso/satellite-6.1.9-rhel-7-x86_64-dvd.iso
+    # remote folder where iso is copied
+    remote_iso_path: /iso
+    # remote folder used to mount iso
+    remote_iso_mount: /media/iso
+    foreman_initial_organization: example
+    foreman_initial_location: dc1
+    foreman_admin_username: admin
+    foreman_admin_password: adminpass
+
+  tasks:
+  - name: set fqdn hostname in /etc/hosts
+    lineinfile: dest=/etc/hosts
+                line='{{ansible_default_ipv4.address}}  {{fqdn_hostname}} {{fqdn_hostname.split('.')[0]}}'
+                backup=yes
+    tags: prerequisites
+
+  - name: set hostname from fqdn
+    hostname: name={{fqdn_hostname.split('.')[0]}}
+    tags: prerequisites
+
+  - name: setup prerequisites based on distribution major version
+    include: playbooks/prerequisites-{{ansible_distribution_major_version}}.yml
+    when: ansible_os_family == "RedHat"
+    tags: prerequisites
+
+  - name: install SOS package for support
+    yum: name=sos state=latest
+    when: install_sos
+
+  - name: install katello
+    yum: name=katello state=latest
+    tags: katello
+
+  - name: setup local repo from Red Hat Enterprise iso
+    include: playbooks/local-repo.yml
+    tags: localrepo
+
+  - name: install packages from Satellite ISO
+    command: ./install_packages chdir={{remote_iso_mount}}
+    tags: packages
+
+  - name: run katello-installer
+    command: katello-installer --foreman-initial-organization
+            "{{foreman_initial_organization}}" \
+            --foreman-initial-location "{{foreman_initial_location}}" \
+            --foreman-admin-username {{foreman_admin_username}} \
+            --foreman-admin-password {{foreman_admin_password}}
+    tags: installer
+
+  - name: setup firewalld for elasticsearch and foreman
+    command: firewall-cmd --permanent --direct --add-rule ipv4 filter OUTPUT 0 -o lo -p tcp -m tcp --dport 9200 -m owner --uid-owner foreman -j ACCEPT \
+             && firewall-cmd --permanent --direct --add-rule ipv6 filter OUTPUT 0 -o lo -p tcp -m tcp --dport 9200 -m owner --uid-owner foreman -j ACCEPT \
+             && firewall-cmd --permanent --direct --add-rule ipv4 filter OUTPUT 0 -o lo -p tcp -m tcp --dport 9200 -m owner --uid-owner root -j ACCEPT \
+             && firewall-cmd --permanent --direct --add-rule ipv6 filter OUTPUT 0 -o lo -p tcp -m tcp --dport 9200 -m owner --uid-owner root -j ACCEPT \
+             && firewall-cmd --permanent --direct --add-rule ipv4 filter OUTPUT 1 -o lo -p tcp -m tcp --dport 9200 -j DROP \
+             && firewall-cmd --permanent --direct --add-rule ipv6 filter OUTPUT 1 -o lo -p tcp -m tcp --dport 9200 -j DROP \
+             && firewall-cmd --reload
+    when: ( ansible_os_family == "RedHat" and ansible_distribution_major_version == "7" )
+    tags: postinstaller, firewalld
+
+  - name: setup iptables for elasticsearch and foreman
+    command: iptables -A OUTPUT -o lo -p tcp -m tcp --dport 9200 -m owner --uid-owner foreman -j ACCEPT \
+             && iptables -A OUTPUT -o lo -p tcp -m tcp --dport 9200 -m owner --uid-owner root -j ACCEPT \
+             && iptables -A OUTPUT -o lo -p tcp -m tcp --dport 9200 -j DROP \
+             && iptables-save > /etc/sysconfig/iptables
+    when: ( ansible_os_family == "RedHat" and ansible_distribution_major_version == "6" )
+    tags: postinstaller, iptables

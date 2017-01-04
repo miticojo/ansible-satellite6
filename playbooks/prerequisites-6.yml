@@ -1,0 +1,20 @@
+- name: install ntp daemon
+  yum: name=ntpd state=latest
+
+- name: start ntpd
+  service: name=ntpd state=started enabled=yes
+
+- name: iptables flows opening
+  shell: iptables -A INPUT -m state --state NEW -p udp --dport 53 -j ACCEPT \
+    && iptables -A INPUT -m state --state NEW -p tcp --dport 53 -j ACCEPT \
+    && iptables -A INPUT -m state --state NEW -p udp --dport 67 -j ACCEPT \
+    && iptables -A INPUT -m state --state NEW -p udp --dport 68 -j ACCEPT \
+    && iptables -A INPUT -m state --state NEW -p udp --dport 69 -j ACCEPT \
+    && iptables -A INPUT -m state --state NEW -p tcp --dport 80 -j ACCEPT \
+    && iptables -A INPUT -m state --state NEW -p tcp --dport 443 -j ACCEPT \
+    && iptables -A INPUT -m state --state NEW -p tcp --dport 5647 -j ACCEPT \
+    && iptables -A INPUT -m state --state NEW -p tcp --dport 8140 -j ACCEPT \
+    && iptables-save > /etc/sysconfig/iptables
+
+- name: checking SELinux status
+  debug: msg="SELinux is {{ ansible_selinux.status }} with policy {{ ansible_selinux.type }}"

@@ -1,0 +1,15 @@
+- name: import RH GPG RPM key
+  shell: rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release
+
+- name: create folder for {{remote_iso_mount}} and {{remote_iso_path}}
+  file: dest={{item}} state=directory force=yes
+  with_items:
+  - "{{remote_iso_mount}}"
+  - "{{remote_iso_path}}"
+
+- name: copy ISO on remote machine
+  copy: src={{local_iso_path}} dest={{remote_iso_path}}/satellite.iso
+
+- name: mount RHEL iso
+  mount: name={{remote_iso_mount}} src={{remote_iso_path}}/satellite.iso
+        fstype=iso9660 opts=ro state=mounted
